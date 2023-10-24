@@ -1,4 +1,3 @@
-import facebook_business
 from facebook_business.api import FacebookAdsApi
 import gspread
 from google.oauth2 import service_account
@@ -10,10 +9,6 @@ import time
 from facebook_business.adobjects.adaccount import AdAccount
 from facebook_business.adobjects.adsinsights import AdsInsights
 from facebook_business.adobjects.adset import AdSet
-
-# Fetch campaign data from Facebook Ads API (modify as needed)
-# from facebook_business.adobjects.adaccount import AdAccount
-
 
 load_dotenv()
 account_id = os.getenv("account_id")
@@ -30,6 +25,7 @@ insight_fields = [
     "impressions",
     "reach",
     "clicks",
+    "actions",
     "cpc",
     "cpm",
     "ctr",
@@ -37,9 +33,11 @@ insight_fields = [
     "spend",
 ]
 
-
 # Initialize Facebook Ads API
 FacebookAdsApi.init(app_id, app_secret, access_token)
+
+# Fetch campaign data from Facebook Ads API (modify as needed)
+# from facebook_business.adobjects.adaccount import AdAccount
 
 
 def get_campaigns(fb_account_id):
@@ -58,6 +56,7 @@ def get_adsets(fb_account_id):
     )
 
 
+# helper function to determine if an adset is part of our active campaigns list
 def is_in_campaigns(id, campaigns):
     for campaign in campaigns:
         id = campaign["id"]
@@ -66,11 +65,13 @@ def is_in_campaigns(id, campaigns):
     return False
 
 
+# get the insights data off an adset
 def get_insights(adset):
     insights_params = {"level": "ad"}
     return ad_set.get_insights(fields=insight_fields, params=insights_params)
 
 
+# determine api load for rate limiting
 def get_api_usage_count(response_headers):
     x_business_use_case_usage = json.loads(
         response_headers.get("x-business-use-case-usage")
@@ -82,73 +83,83 @@ def get_api_usage_count(response_headers):
     call_count = response_values["call_count"]
     total_time = response_values["total_time"]
     total_cputime = response_values["total_cputime"]
-    print(str(call_count) + str(total_time) + str(total_cputime))
     usage = call_count + total_cputime + total_time
     return usage
 
 
-def write_file(data):
-    f = open("insights.csv", "w")
-    f.write(data)
-    f.close()
+# mobile_app_install is part of a list in the 'actions' field.  So this logic exracts that value
+def extract_mobile_installs(ad_insights):
+    # Extract the 'actions' list from the AdInsights object
+    first_ad_insights = ad_insights[0]
+    # ad_insight = ad_insights[0]
+    actions_list = first_ad_insights.get("actions", [])
+
+    # Initialize a variable to store the 'mobile_app_install' value
+    mobile_app_install_value = 0
+
+    # Iterate through the 'actions' list and find the 'mobile_app_install' action
+    for action in actions_list:
+        if action.get("action_type") == "mobile_app_install":
+            mobile_app_install_value = int(action.get("value"))
+            break  # Exit the loop once you find the 'mobile_app_install' action
+
+    return mobile_app_install_value
 
 
+# Convert the AdInsights data to a dictionary row and add mobile installs as a column
+def build_new_row(insights_data):
+    mobile_installs = extract_mobile_installs(insights_data)
+
+    for insights in insights_data:
+        # Extract insight data for the current ad set
+        insights_dict = {}
+        for field in insight_fields:
+            try:
+                insights_dict[field] = insights[field]
+            except KeyError:
+                continue
+
+        insights_dict["actions"] = mobile_installs
+    return insights_dict
+
+
+def write_google_sheet(data_frame):
+    # Initialize Google Sheets API
+    gc = gspread.service_account(filename=google_sheets_credentials)
+    sh = gc.open_by_key(google_sheets_spreadsheet_id)
+    worksheet = sh.worksheet(google_sheets_worksheet_name)
+
+    # Push data to Google Sheets
+    adsetsData_with_header = [adsetsData.columns.tolist()] + adsetsData.values.tolist()
+    # Update the worksheet with new data
+    worksheet.clear()
+    worksheet.update("A1", adsetsData_with_header)
+
+
+# Get the insights for each Adset and store in a DataFrame
 adsetsData = pd.DataFrame(columns=insight_fields)
 
 campaigns = get_campaigns(account_id)
 adsets = get_adsets(account_id)
-i = 0
+
 for adset in adsets:
     adset_id = adset.get_id()
     if is_in_campaigns(adset_id, campaigns):
-        print("ad is part of campaign")
+        status = adset[AdSet.Field.status]
+        ad_set = AdSet(fbid=adset_id)
+        try:
+            insights_data = get_insights(adset)
+        except:
+            time.sleep(10)
 
-    status = adset[AdSet.Field.status]
-    print(f"Processing ad set {adset_id}")
+        response_headers = insights_data.headers()
+        usage = get_api_usage_count(response_headers)
 
-    ad_set = AdSet(fbid=adset_id)
+        if usage >= 7:
+            time.sleep(10)
 
-    insights_data = get_insights(adset)
-    print("insights_data: " + str(insights_data))
-
-    response_headers = insights_data.headers()
-    usage = get_api_usage_count(response_headers)
-    print("usage = " + str(usage))
-
-    if usage >= 7:
-        time.sleep(10)
-
-    if len(insights_data) != 0:
-        print("length of insights data: " + str(len(insights_data)))
-        for insights in insights_data:
-            # Extract insight data for the current ad set
-            print("#####")
-            print(insight_fields)
-            print("#####")
-            print(insights)
-            insights_dict = {field: insights[field] for field in insight_fields}
-            print(insights_dict)
+        if len(insights_data) != 0:
+            insights_dict = build_new_row(insights_data)
             adsetsData = adsetsData.append(insights_dict, ignore_index=True)
-    print("number of iterations = " + str(i))
-    i = i + 1
-write_file(adsetsData)
-
-"""
-
-# Initialize Google Sheets API
-gc = gspread.service_account(filename=google_sheets_credentials)
-sh = gc.open_by_key(google_sheets_spreadsheet_id)
-worksheet = sh.worksheet(google_sheets_worksheet_name)
-
-# Push data to Google Sheets
-data_to_push = [["Campaign Name", "Spend", "Impressions", "Clicks"]]
-# for adset in adsets:
-#    data_to_push.append([adset['campaign_name'], adset['spend'], adset['impressions'], adset['clicks']])
-
-# Update the worksheet with new data
-worksheet.clear()
-worksheet.update("A1", data_to_push)
-
-print("Data successfully updated in Google Sheets!")
-"""
-print(adsetsData)
+breakpoint()
+write_google_sheet(adsetsData)
