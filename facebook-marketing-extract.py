@@ -20,7 +20,7 @@ app_secret = os.getenv("app_secret")
 access_token = os.getenv("access_token")
 
 insight_fields = [
-    "ad_id",
+    "adset_id",
     "campaign_name",
     "impressions",
     "reach",
@@ -83,6 +83,7 @@ def get_api_usage_count(response_headers):
     call_count = response_values["call_count"]
     total_time = response_values["total_time"]
     total_cputime = response_values["total_cputime"]
+    print(str(call_count) + str(total_time) + str(total_cputime))
     usage = call_count + total_cputime + total_time
     return usage
 
@@ -140,26 +141,35 @@ def write_google_sheet(data_frame):
 adsetsData = pd.DataFrame(columns=insight_fields)
 
 campaigns = get_campaigns(account_id)
-adsets = get_adsets(account_id)
-
+try:
+    adsets = get_adsets(account_id)
+except:
+    time.sleep(10)
+i = 0
 for adset in adsets:
     adset_id = adset.get_id()
     if is_in_campaigns(adset_id, campaigns):
-        status = adset[AdSet.Field.status]
         ad_set = AdSet(fbid=adset_id)
         try:
             insights_data = get_insights(adset)
-        except:
+        except Exception as error:
+            print("exception" + str(error))
             time.sleep(10)
 
         response_headers = insights_data.headers()
         usage = get_api_usage_count(response_headers)
 
         if usage >= 7:
-            time.sleep(10)
+            time.sleep(5)
 
         if len(insights_data) != 0:
             insights_dict = build_new_row(insights_data)
-            adsetsData = adsetsData.append(insights_dict, ignore_index=True)
-breakpoint()
+            df_row = pd.DataFrame(insights_dict, index=[0])
+            adsetsData = pd.concat([adsetsData, df_row], ignore_index=True)
+    i = i + 1
+    print(str(i))
+# handle NaN values
+
+adsetsData = adsetsData.fillna(0)
+print(adsetsData)
 write_google_sheet(adsetsData)
