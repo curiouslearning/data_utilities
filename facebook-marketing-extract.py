@@ -141,26 +141,19 @@ def write_google_sheet(data_frame):
 adsetsData = pd.DataFrame(columns=insight_fields)
 
 campaigns = get_campaigns(account_id)
-try:
-    adsets = get_adsets(account_id)
-except:
-    time.sleep(10)
+adsets = get_adsets(account_id)
 i = 0
 for adset in adsets:
     adset_id = adset.get_id()
     if is_in_campaigns(adset_id, campaigns):
         ad_set = AdSet(fbid=adset_id)
-        try:
-            insights_data = get_insights(adset)
-        except Exception as error:
-            print("exception" + str(error))
-            time.sleep(10)
+        insights_data = get_insights(adset)
 
         response_headers = insights_data.headers()
         usage = get_api_usage_count(response_headers)
 
         if usage >= 7:
-            time.sleep(5)
+            time.sleep(6)
 
         if len(insights_data) != 0:
             insights_dict = build_new_row(insights_data)
@@ -168,6 +161,7 @@ for adset in adsets:
             adsetsData = pd.concat([adsetsData, df_row], ignore_index=True)
     i = i + 1
     print(str(i))
+    time.sleep(1)
 # handle NaN values
 
 adsetsData = adsetsData.fillna(0)
