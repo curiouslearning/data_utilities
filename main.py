@@ -14,21 +14,11 @@ from google.cloud import secretmanager
 
 client = secretmanager.SecretManagerServiceClient()
 logger = logging.getLogger()
-attributes = {}
-
-
-schema_exchange_rate = [
-    bigquery.SchemaField("date", "DATE", mode="REQUIRED"),
-    bigquery.SchemaField("currencies", "STRING", mode="REQUIRED"),
-    bigquery.SchemaField("rate", "FLOAT", mode="REQUIRED"),
-]
 
 schema_facebook_stat = [
     bigquery.SchemaField("date", "DATE", mode="REQUIRED"),
-    # bigquery.SchemaField("ad_id", "STRING", mode="REQUIRED"),
-    # bigquery.SchemaField("ad_name", "STRING", mode="REQUIRED"),
-    # bigquery.SchemaField("adset_id", "STRING", mode="REQUIRED"),
-    # bigquery.SchemaField("adset_name", "STRING", mode="REQUIRED"),
+    bigquery.SchemaField("adset_id", "STRING", mode="REQUIRED"),
+    bigquery.SchemaField("adset_name", "STRING", mode="REQUIRED"),
     bigquery.SchemaField("campaign_id", "STRING", mode="REQUIRED"),
     bigquery.SchemaField("campaign_name", "STRING", mode="REQUIRED"),
     bigquery.SchemaField("start_date", "STRING", mode="REQUIRED"),
@@ -169,11 +159,11 @@ def get_facebook_data(event):
             ],
             params={
                 "level": "campaign",
-                "time_range": {
-                    "since": yesterday.strftime("%Y-%m-%d"),
-                    "until": yesterday.strftime("%Y-%m-%d"),
-                },
-                "time_increment": 1,
+                #               "time_range": {
+                #                   "since": yesterday.strftime("%Y-%m-%d"),
+                #                   "until": yesterday.strftime("%Y-%m-%d"),
+                #               },
+                "time_increment": ["all_days"],
             },
         )
     except Exception as e:
@@ -202,10 +192,8 @@ def get_facebook_data(event):
         fb_source.append(
             {
                 "date": item["date_start"],
-                # "ad_id": item["adset_id"],
-                #   "ad_name": item["adset_name"],
-                #  "adset_id": item["adset_id"],
-                #   "adset_name": item["adset_name"],
+                "adset_id": item["adset_id"],
+                "adset_name": item["adset_name"],
                 "campaign_id": item["campaign_id"],
                 "campaign_name": item["campaign_name"],
                 "start_date": item["date_start"],
