@@ -1,10 +1,7 @@
 from google.cloud import bigquery
 from google.cloud.exceptions import NotFound
 from datetime import datetime, date, timedelta
-import requests
 import logging
-import json
-import base64
 from facebook_business.api import FacebookAdsApi
 from facebook_business.adobjects.adaccount import AdAccount
 from facebook_business.adobjects.adaccountuser import AdAccountUser
@@ -14,11 +11,15 @@ from google.cloud import secretmanager
 
 client = secretmanager.SecretManagerServiceClient()
 logger = logging.getLogger()
+attributes = {}
+
+
+schema_exchange_rate = [
+    bigquery.SchemaField("date", "DATE", mode="REQUIRED"),
+]
 
 schema_facebook_stat = [
     bigquery.SchemaField("date", "DATE", mode="REQUIRED"),
-    bigquery.SchemaField("adset_id", "STRING", mode="REQUIRED"),
-    bigquery.SchemaField("adset_name", "STRING", mode="REQUIRED"),
     bigquery.SchemaField("campaign_id", "STRING", mode="REQUIRED"),
     bigquery.SchemaField("campaign_name", "STRING", mode="REQUIRED"),
     bigquery.SchemaField("start_date", "STRING", mode="REQUIRED"),
@@ -145,10 +146,6 @@ def get_facebook_data(event):
                 AdsInsights.Field.campaign_name,
                 AdsInsights.Field.date_start,
                 AdsInsights.Field.date_stop,
-                #   AdsInsights.Field.adset_name,
-                #   AdsInsights.Field.adset_id,
-                #   AdsInsights.Field.ad_name,
-                #   AdsInsights.Field.ad_id,
                 AdsInsights.Field.spend,
                 AdsInsights.Field.impressions,
                 AdsInsights.Field.reach,
@@ -159,11 +156,6 @@ def get_facebook_data(event):
             ],
             params={
                 "level": "campaign",
-                #               "time_range": {
-                #                   "since": yesterday.strftime("%Y-%m-%d"),
-                #                   "until": yesterday.strftime("%Y-%m-%d"),
-                #               },
-                "time_increment": ["all_days"],
             },
         )
     except Exception as e:
@@ -191,18 +183,16 @@ def get_facebook_data(event):
 
         fb_source.append(
             {
-                "date": item["date_start"],
-                "adset_id": item["adset_id"],
-                "adset_name": item["adset_name"],
-                "campaign_id": item["campaign_id"],
-                "campaign_name": item["campaign_name"],
-                "start_date": item["date_start"],
-                "end_date": item["date_stop"],
-                "clicks": item["clicks"],
-                "impressions": item["impressions"],
-                "reach": item["reach"],
-                "cpc": item["cpc"],
-                "spend": item["spend"],
+                "date": datetime.now().strftime("%Y-%m-%d"),
+                "campaign_id": item.get("campaign_id"),
+                "campaign_name": item.get("campaign_name"),
+                "start_date": item.get("date_start"),
+                "end_date": item.get("date_stop"),
+                "clicks": item.get("clicks"),
+                "impressions": item.get("impressions"),
+                "reach": item.get("reach"),
+                "cpc": item.get("cpc", 0),
+                "spend": item.get("spend"),
                 "conversions": conversions,
                 "actions": actions,
             }
