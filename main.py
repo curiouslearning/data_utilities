@@ -14,9 +14,22 @@ logger = logging.getLogger()
 attributes = {}
 
 
-schema_exchange_rate = [
-    bigquery.SchemaField("date", "DATE", mode="REQUIRED"),
+query_fields = [
+    AdsInsights.Field.account_id,
+    AdsInsights.Field.campaign_id,
+    AdsInsights.Field.campaign_name,
+    AdsInsights.Field.date_start,
+    AdsInsights.Field.date_stop,
+    AdsInsights.Field.spend,
+    AdsInsights.Field.impressions,
+    AdsInsights.Field.reach,
+    AdsInsights.Field.cpc,
+    AdsInsights.Field.clicks,
+    AdsInsights.Field.actions,
+    AdsInsights.Field.conversions,
 ]
+query_params = {"level": "campaign", "limit": "500", "date_preset": "maximum"}
+
 
 schema_facebook_stat = [
     bigquery.SchemaField("date", "DATE", mode="REQUIRED"),
@@ -121,7 +134,6 @@ def insert_rows_bq(client, table_id, dataset_id, project_id, data):
         table=table_ref,
     )
     if len(resp) > 0:
-        print("respone: " + str(resp))
         logger.info(str(resp))
     else:
         logger.info("Success uploaded to table {}".format(table.table_id))
@@ -140,26 +152,9 @@ def get_facebook_data(event):
         )
 
         account = AdAccount("act_" + str(attributes["fb_account_id"]))
-        insights = account.get_insights(
-            fields=[
-                AdsInsights.Field.account_id,
-                AdsInsights.Field.campaign_id,
-                AdsInsights.Field.campaign_name,
-                AdsInsights.Field.date_start,
-                AdsInsights.Field.date_stop,
-                AdsInsights.Field.spend,
-                AdsInsights.Field.impressions,
-                AdsInsights.Field.reach,
-                AdsInsights.Field.cpc,
-                AdsInsights.Field.clicks,
-                AdsInsights.Field.actions,
-                AdsInsights.Field.conversions,
-            ],
-            params={"level": "campaign", "limit": "10"},
-        )
+        insights = account.get_insights(query_fields, query_params)
     except Exception as e:
         logger.info(e)
-        print(e)
         raise
 
     fb_source = []
@@ -214,6 +209,5 @@ def get_facebook_data(event):
             attributes["gcp_project_id"],
             fb_source,
         )
-        print("fb source")
-        print(fb_source)
+
         return "ok"
