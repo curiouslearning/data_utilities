@@ -91,6 +91,7 @@ def exist_dataset_table(
         client.get_table(table_ref)  # Make an API request.
 
     except NotFound:
+        print("creating table")
         table_ref = "{}.{}.{}".format(project_id, dataset_id, table_id)
 
         table = bigquery.Table(table_ref, schema=schema)
@@ -103,6 +104,7 @@ def exist_dataset_table(
             table.clustering_fields = clustering_fields
 
         table = client.create_table(table)  # Make an API request.
+        print("table created")
         logger.info(
             "Created table {}.{}.{}".format(
                 table.project, table.dataset_id, table.table_id
@@ -118,18 +120,17 @@ def insert_rows_bq(client, table_id, dataset_id, project_id, data):
         json_rows=data,
         table=table_ref,
     )
-    print(resp)
-
-
-# logger.info("Success uploaded to table {}".format(table.table_id))
+    if len(resp) > 0:
+        print("respone: " + str(resp))
+        logger.info(str(resp))
+    else:
+        logger.info("Success uploaded to table {}".format(table.table_id))
 
 
 def get_facebook_data(event):
     attributes = set_attributes()
 
     bigquery_client = bigquery.Client()
-
-    yesterday = date.today() - timedelta(1)
 
     try:
         FacebookAdsApi.init(
@@ -154,9 +155,7 @@ def get_facebook_data(event):
                 AdsInsights.Field.actions,
                 AdsInsights.Field.conversions,
             ],
-            params={
-                "level": "campaign",
-            },
+            params={"level": "campaign", "limit": "10"},
         )
     except Exception as e:
         logger.info(e)
@@ -197,23 +196,24 @@ def get_facebook_data(event):
                 "actions": actions,
             }
         )
-        print("fb_source = " + str(fb_source))
-        if (
-            exist_dataset_table(
-                bigquery_client,
-                attributes["table_id"],
-                attributes["dataset_id"],
-                attributes["gcp_project_id"],
-                schema_facebook_stat,
-                clustering_fields_facebook,
-            )
-            == "ok"
-        ):
-            insert_rows_bq(
-                bigquery_client,
-                attributes["table_id"],
-                attributes["dataset_id"],
-                attributes["gcp_project_id"],
-                fb_source,
-            )
-            return "ok"
+    if (
+        exist_dataset_table(
+            bigquery_client,
+            attributes["table_id"],
+            attributes["dataset_id"],
+            attributes["gcp_project_id"],
+            schema_facebook_stat,
+            clustering_fields_facebook,
+        )
+        == "ok"
+    ):
+        insert_rows_bq(
+            bigquery_client,
+            attributes["table_id"],
+            attributes["dataset_id"],
+            attributes["gcp_project_id"],
+            fb_source,
+        )
+        print("fb source")
+        print(fb_source)
+        return "ok"
