@@ -8,18 +8,27 @@ from facebook_business.adobjects.adaccountuser import AdAccountUser
 from facebook_business.adobjects.adsinsights import AdsInsights
 from facebook_business.adobjects.campaign import Campaign
 from google.cloud import secretmanager
+import time
 
 client = secretmanager.SecretManagerServiceClient()
 logger = logging.getLogger()
 attributes = {}
 
+campaigns_query_fields = [
+    Campaign.Field.id,
+    Campaign.Field.created_time,
+    Campaign.Field.start_time,
+    Campaign.Field.stop_time,
+    Campaign.Field.status,
+    Campaign.Field.objective,
+]
+campaigns_query_params = {"limit": "500", "date_preset": "maximum"}
 
-query_fields = [
+
+insights_query_fields = [
     AdsInsights.Field.account_id,
     AdsInsights.Field.campaign_id,
     AdsInsights.Field.campaign_name,
-    AdsInsights.Field.date_start,
-    AdsInsights.Field.date_stop,
     AdsInsights.Field.spend,
     AdsInsights.Field.impressions,
     AdsInsights.Field.reach,
@@ -28,15 +37,18 @@ query_fields = [
     AdsInsights.Field.actions,
     AdsInsights.Field.conversions,
 ]
-query_params = {"level": "campaign", "limit": "500", "date_preset": "maximum"}
+insights_query_params = {"level": "campaign", "limit": "500", "date_preset": "maximum"}
 
 
 schema_facebook_stat = [
     bigquery.SchemaField("date", "DATE", mode="REQUIRED"),
     bigquery.SchemaField("campaign_id", "STRING", mode="REQUIRED"),
     bigquery.SchemaField("campaign_name", "STRING", mode="REQUIRED"),
-    bigquery.SchemaField("start_date", "STRING", mode="REQUIRED"),
-    bigquery.SchemaField("end_date", "STRING", mode="REQUIRED"),
+    bigquery.SchemaField("created_time", "STRING", mode="REQUIRED"),
+    bigquery.SchemaField("start_time", "STRING", mode="REQUIRED"),
+    bigquery.SchemaField("end_time", "STRING", mode="REQUIRED"),
+    bigquery.SchemaField("status", "STRING", mode="REQUIRED"),
+    bigquery.SchemaField("objective", "STRING", mode="REQUIRED"),
     bigquery.SchemaField("clicks", "INTEGER", mode="REQUIRED"),
     bigquery.SchemaField("impressions", "INTEGER", mode="REQUIRED"),
     bigquery.SchemaField("reach", "INTEGER", mode="REQUIRED"),
@@ -123,6 +135,7 @@ def exist_dataset_table(
                 table.project, table.dataset_id, table.table_id
             )
         )
+        time.sleep(5)  # give a moment before any actions on the table
     return "ok"
 
 
@@ -139,6 +152,16 @@ def insert_rows_bq(client, table_id, dataset_id, project_id, data):
         logger.info("Success uploaded to table {}".format(table.table_id))
 
 
+def lookup_campaign(campaign_id, campaigns):
+    campaign_ret = Campaign()
+    for index in range(len(campaigns)):
+        campaign = campaigns[index]
+        id = campaign.get("id")
+        if id == campaign_id:
+            campaign_ret = campaign
+    return campaign_ret
+
+
 def get_facebook_data(event):
     attributes = set_attributes()
 
@@ -152,9 +175,12 @@ def get_facebook_data(event):
         )
 
         account = AdAccount("act_" + str(attributes["fb_account_id"]))
-        insights = account.get_insights(query_fields, query_params)
+        campaigns = account.get_campaigns(
+            campaigns_query_fields, campaigns_query_params
+        )
+        insights = account.get_insights(insights_query_fields, insights_query_params)
     except Exception as e:
-        logger.info(e)
+        logger.warning(e)
         raise
 
     fb_source = []
@@ -162,6 +188,21 @@ def get_facebook_data(event):
     for index, item in enumerate(insights):
         actions = []
         conversions = []
+        start = ""
+        end = ""
+        created = ""
+        status = ""
+        objective = ""
+
+        id = item.get("campaign_id")
+
+        campaign = lookup_campaign(id, campaigns)
+        if campaign != "None":
+            start = campaign.get("start_time")
+            end = campaign.get("end_time")
+            created = campaign.get("created_time")
+            status = campaign.get("status")
+            objective = campaign.get("objective")
 
         if "actions" in item:
             for i, value in enumerate(item["actions"]):
@@ -174,14 +215,16 @@ def get_facebook_data(event):
                 conversions.append(
                     {"action_type": value["action_type"], "value": value["value"]}
                 )
-
         fb_source.append(
             {
                 "date": datetime.now().strftime("%Y-%m-%d"),
                 "campaign_id": item.get("campaign_id"),
                 "campaign_name": item.get("campaign_name"),
-                "start_date": item.get("date_start"),
-                "end_date": item.get("date_stop"),
+                "created_time": campaign.get("created_time", ""),
+                "start_time": campaign.get("start_time", ""),
+                "end_time": campaign.get("end_time", ""),
+                "status": campaign.get("status", ""),
+                "objective": campaign.get("objective", ""),
                 "clicks": item.get("clicks"),
                 "impressions": item.get("impressions"),
                 "reach": item.get("reach"),
