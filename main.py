@@ -1,4 +1,5 @@
 from google.cloud import bigquery
+from google.api_core.retry import Retry
 from google.cloud.exceptions import NotFound
 from datetime import datetime, date, timedelta
 import logging
@@ -74,6 +75,13 @@ schema_facebook_stat = [
     ),
 ]
 
+custom_retry = Retry(
+    initial=10,  # Initial delay in seconds
+    maximum=30,  # Maximum delay in seconds
+    multiplier=1.5,  # Delay multiplier
+    deadline=60,  # Maximum time allowed for retries
+)
+
 clustering_fields_facebook = ["campaign_id", "campaign_name"]
 
 
@@ -97,7 +105,7 @@ def set_attributes():
     return attributes
 
 
-def exist_dataset_table(
+def setup_bigquery_table(
     client, table_id, dataset_id, project_id, schema, clustering_fields=None
 ):
     try:
@@ -113,43 +121,66 @@ def exist_dataset_table(
 
     try:
         table_ref = "{}.{}.{}".format(project_id, dataset_id, table_id)
-        client.get_table(table_ref)  # Make an API request.
+        table = client.get_table(table_ref)  # Make an API request.
+
+        try:
+            client.delete_table(table)
+        except Exception as e:
+            print("Table delete failed")
+            logger.error(e)
+        try:
+            create_table_bigquery(
+                client, table_id, dataset_id, project_id, schema, clustering_fields
+            )
+        except Exception as e:
+            print("Table recreate failed")
+            logger.error(e)
 
     except NotFound:
-        print("creating table")
-        table_ref = "{}.{}.{}".format(project_id, dataset_id, table_id)
-
-        table = bigquery.Table(table_ref, schema=schema)
-
-        table.time_partitioning = bigquery.TimePartitioning(
-            type_=bigquery.TimePartitioningType.DAY, field="date"
+        create_table_bigquery(
+            client, table_id, dataset_id, project_id, schema, clustering_fields
         )
-
-        if clustering_fields is not None:
-            table.clustering_fields = clustering_fields
-
-        table = client.create_table(table)  # Make an API request.
-        print("table created")
-        logger.info(
-            "Created table {}.{}.{}".format(
-                table.project, table.dataset_id, table.table_id
-            )
-        )
-        time.sleep(5)  # give a moment before any actions on the table
     return "ok"
 
 
-def insert_rows_bq(client, table_id, dataset_id, project_id, data):
+def create_table_bigquery(
+    client, table_id, dataset_id, project_id, schema, clustering_fields
+):
+    print("creating table")
+    table_ref = "{}.{}.{}".format(project_id, dataset_id, table_id)
+
+    table = bigquery.Table(table_ref, schema=schema)
+
+    table.time_partitioning = bigquery.TimePartitioning(
+        type_=bigquery.TimePartitioningType.DAY, field="date"
+    )
+
+    if clustering_fields is not None:
+        table.clustering_fields = clustering_fields
+
+    table = client.create_table(table)  # Make an API request.
+    print("table created")
+    logger.info(
+        "Created table {}.{}.{}".format(table.project, table.dataset_id, table.table_id)
+    )
+
+
+def insert_rows_bigquery(client, table_id, dataset_id, project_id, data):
     table_ref = "{}.{}.{}".format(project_id, dataset_id, table_id)
     table = client.get_table(table_ref)
-    resp = client.insert_rows_json(
-        json_rows=data,
-        table=table_ref,
-    )
-    if len(resp) > 0:
-        logger.info(str(resp))
-    else:
-        logger.info("Success uploaded to table {}".format(table.table_id))
+    resp = None
+    while resp is None:
+        try:
+            resp = client.insert_rows_json(
+                json_rows=data, table=table_ref, retry=custom_retry
+            )
+            if len(resp) > 0:
+                logger.info(str(resp))
+            else:
+                print("Success uploaded to table {}".format(table.table_id))
+                logger.info("Success uploaded to table {}".format(table.table_id))
+        except Exception as e:
+            logger.error(e)
 
 
 def lookup_campaign(campaign_id, campaigns):
@@ -180,7 +211,7 @@ def get_facebook_data(event):
         )
         insights = account.get_insights(insights_query_fields, insights_query_params)
     except Exception as e:
-        logger.warning(e)
+        logger.error(e)
         raise
 
     fb_source = []
@@ -188,21 +219,10 @@ def get_facebook_data(event):
     for index, item in enumerate(insights):
         actions = []
         conversions = []
-        start = ""
-        end = ""
-        created = ""
-        status = ""
-        objective = ""
 
         id = item.get("campaign_id")
 
         campaign = lookup_campaign(id, campaigns)
-        if campaign != "None":
-            start = campaign.get("start_time")
-            end = campaign.get("end_time")
-            created = campaign.get("created_time")
-            status = campaign.get("status")
-            objective = campaign.get("objective")
 
         if "actions" in item:
             for i, value in enumerate(item["actions"]):
@@ -235,7 +255,7 @@ def get_facebook_data(event):
             }
         )
     if (
-        exist_dataset_table(
+        setup_bigquery_table(
             bigquery_client,
             attributes["table_id"],
             attributes["dataset_id"],
@@ -245,7 +265,7 @@ def get_facebook_data(event):
         )
         == "ok"
     ):
-        insert_rows_bq(
+        insert_rows_bigquery(
             bigquery_client,
             attributes["table_id"],
             attributes["dataset_id"],
