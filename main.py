@@ -2,17 +2,28 @@ from google.cloud import bigquery
 from google.api_core.retry import Retry
 from google.cloud.exceptions import NotFound
 from datetime import datetime, date, timedelta
-import logging
 from facebook_business.api import FacebookAdsApi
 from facebook_business.adobjects.adaccount import AdAccount
 from facebook_business.adobjects.adaccountuser import AdAccountUser
 from facebook_business.adobjects.adsinsights import AdsInsights
 from facebook_business.adobjects.campaign import Campaign
 from google.cloud import secretmanager
+import google.cloud.logging
+import logging
 import time
+import os
+
 
 client = secretmanager.SecretManagerServiceClient()
+logging_client = google.cloud.logging.Client()
+logging_client.setup_logging(log_level=logging.DEBUG)
+logging_client.setup_logging()
 logger = logging.getLogger()
+if os.getenv("LOCAL_LOGGING", "False") == "True":
+    # output logs to console - otherwise logs are only visible when running in GCP
+    logger.addHandler(logging.StreamHandler())
+
+
 attributes = {}
 
 campaigns_query_fields = [
@@ -42,7 +53,7 @@ insights_query_params = {"level": "campaign", "limit": "500", "date_preset": "ma
 
 
 schema_facebook_stat = [
-    bigquery.SchemaField("date", "DATE", mode="REQUIRED"),
+    bigquery.SchemaField("date", "DATETIME", mode="REQUIRED"),
     bigquery.SchemaField("campaign_id", "STRING", mode="REQUIRED"),
     bigquery.SchemaField("campaign_name", "STRING", mode="REQUIRED"),
     bigquery.SchemaField("created_time", "STRING", mode="REQUIRED"),
@@ -117,7 +128,7 @@ def setup_bigquery_table(
         dataset = bigquery.Dataset(dataset_ref)
         dataset.location = "US"
         dataset = client.create_dataset(dataset)  # Make an API request.
-        logger.info("Created dataset {}.{}".format(client.project, dataset.dataset_id))
+        logging.info("Created dataset {}.{}".format(client.project, dataset.dataset_id))
 
     try:
         table_ref = "{}.{}.{}".format(project_id, dataset_id, table_id)
@@ -126,15 +137,15 @@ def setup_bigquery_table(
         try:
             client.delete_table(table)
         except Exception as e:
-            print("Table delete failed")
-            logger.error(e)
+            logging.info("Table delete failed")
+            logging.error(e)
         try:
             create_table_bigquery(
                 client, table_id, dataset_id, project_id, schema, clustering_fields
             )
         except Exception as e:
-            print("Table recreate failed")
-            logger.error(e)
+            logging.info("Table recreate failed")
+            logging.error(e)
 
     except NotFound:
         create_table_bigquery(
@@ -146,7 +157,6 @@ def setup_bigquery_table(
 def create_table_bigquery(
     client, table_id, dataset_id, project_id, schema, clustering_fields
 ):
-    print("creating table")
     table_ref = "{}.{}.{}".format(project_id, dataset_id, table_id)
 
     table = bigquery.Table(table_ref, schema=schema)
@@ -159,8 +169,8 @@ def create_table_bigquery(
         table.clustering_fields = clustering_fields
 
     table = client.create_table(table)  # Make an API request.
-    print("table created")
-    logger.info(
+    logging.info("table created")
+    logging.info(
         "Created table {}.{}.{}".format(table.project, table.dataset_id, table.table_id)
     )
 
@@ -175,12 +185,11 @@ def insert_rows_bigquery(client, table_id, dataset_id, project_id, data):
                 json_rows=data, table=table_ref, retry=custom_retry
             )
             if len(resp) > 0:
-                logger.info(str(resp))
+                logging.info(str(resp))
             else:
-                print("Success uploaded to table {}".format(table.table_id))
-                logger.info("Success uploaded to table {}".format(table.table_id))
+                logging.info("Success uploaded to table {}".format(table.table_id))
         except Exception as e:
-            logger.error(e)
+            logging.error(e)
 
 
 def lookup_campaign(campaign_id, campaigns):
@@ -194,6 +203,7 @@ def lookup_campaign(campaign_id, campaigns):
 
 
 def get_facebook_data(event):
+    logger.info("Facebook import function is running.  Event: " + str(event))
     attributes = set_attributes()
 
     bigquery_client = bigquery.Client()
@@ -211,7 +221,7 @@ def get_facebook_data(event):
         )
         insights = account.get_insights(insights_query_fields, insights_query_params)
     except Exception as e:
-        logger.error(e)
+        logging.error(e)
         raise
 
     fb_source = []
@@ -235,9 +245,10 @@ def get_facebook_data(event):
                 conversions.append(
                     {"action_type": value["action_type"], "value": value["value"]}
                 )
+        bq_date_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
         fb_source.append(
             {
-                "date": datetime.now().strftime("%Y-%m-%d"),
+                "date": bq_date_time,
                 "campaign_id": item.get("campaign_id"),
                 "campaign_name": item.get("campaign_name"),
                 "created_time": campaign.get("created_time", ""),

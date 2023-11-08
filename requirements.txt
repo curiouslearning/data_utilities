@@ -2,3 +2,6 @@ datetime
 google-cloud-logging
 google-cloud-bigquery
 facebook_business
+google.cloud
+google-cloud-secret-manager==2.0.0
+google.cloud.logging
