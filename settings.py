@@ -8,7 +8,7 @@ def get_secrets():
     client = secretmanager.SecretManagerServiceClient()
     attributes = {
         "table_id": get_secret(client, "table_id"),
-        "dataset_id": get_secret(client, "dataset_id"),
+        "dataset_id": get_secret(client, "dataset_name"),
         "fb_access_token": get_secret(client, "fb_access_token"),
         "fb_account_id": get_secret(client, "fb_account_id"),
         "fb_app_id": get_secret(client, "fb_app_id"),
