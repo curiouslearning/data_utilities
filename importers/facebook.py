@@ -25,13 +25,6 @@ campaigns_query_fields = [
 campaigns_query_params = {
     "limit": "500",
     "date_preset": "maximum",
-    "filtering": [
-        {
-            "field": "campaign.effective_status",
-            "operator": "IN",
-            "value": ["ACTIVE", "PAUSED"],
-        }
-    ],
 }
 
 
@@ -47,17 +40,40 @@ insights_query_fields = [
     AdsInsights.Field.actions,
     AdsInsights.Field.conversions,
 ]
-insights_query_params = {
-    "level": "campaign",
-    "limit": "10",
-    "time_range": {"since": "2022-09-01", "until": "2023-11-13"},
-    "time_increment": 1,
-}
+
+
+def get_insights_query_params(bq_client):
+    import datetime
+
+    date = get_last_insert_date(bq_client)
+    last_run = date.strftime("%Y-%m-%d")
+    now = datetime.datetime.now().strftime("%Y-%m-%d")
+    daterange = "["
+    day = date
+    while day <= datetime.datetime.now():
+        daystr = day.strftime("%Y-%m-%d")
+        nextday = day + datetime.timedelta(days=1)
+        nextdaystr = nextday.strftime("%Y-%m-%d")
+        daterange += '{"since": "' + daystr + '", "until": "' + nextdaystr + '"},'
+        day = nextday
+
+    daterange += "]"
+
+    insights_query_params = {
+        "level": "campaign",
+        "limit": "1000",
+        "time_ranges": daterange,
+        "increment": 1,
+    }
+    return insights_query_params
 
 
 @retry(backoff=3, tries=6, delay=5)
-def get_insights_retry(account, insights_query_fields, qp):
-    insights = account.get_insights(insights_query_fields, qp)
+def get_insights_retry(account, bq_client):
+    qp = get_insights_query_params(bq_client)
+    print("qp = " + str(qp))
+    breakpoint()
+    insights = account.get_insights(fields=insights_query_fields, params=qp)
     return insights
 
 
@@ -93,11 +109,23 @@ def lookup_campaign(campaign_id, campaigns):
     return campaign_ret
 
 
+def get_last_insert_date(bq_client):
+    sql_query = f"""
+        select max(date_inserted)
+        FROM `dataexploration-193817.marketing_data.facebook_ads_data`
+    """
+    query_job = bq_client.query(sql_query)
+    rows = query_job.result()
+    row = next(rows)
+    return row[0]
+
+    return last
+
+
 def get_facebook_data():
     logger.info("Facebook import function is running. ")
 
     bigquery_client = bigquery.Client()
-
     try:
         FacebookAdsApi.init(
             attributes["fb_app_id"],
@@ -109,9 +137,7 @@ def get_facebook_data():
         campaigns = account.get_campaigns(
             campaigns_query_fields, campaigns_query_params
         )
-
-        # Fetch insights with pagination
-        insights = get_insights_retry(account, insights_query_fields, qp)
+        insights = get_insights_retry(account, bigquery_client)
 
     except Exception as e:
         logger.error(e)
@@ -140,7 +166,8 @@ def get_facebook_data():
         bq_date_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
         fb_source.append(
             {
-                "date": bq_date_time,
+                "date_inserted": bq_date_time,
+                "data_date_start": item.get("date_start"),
                 "campaign_id": item.get("campaign_id"),
                 "campaign_name": item.get("campaign_name"),
                 "created_time": campaign.get("created_time", ""),
@@ -157,10 +184,14 @@ def get_facebook_data():
                 "actions": actions,
             }
         )
-        insert_rows_bigquery(
+        print("Data = " + str(fb_source))
+
+
+"""        insert_rows_bigquery(
             bigquery_client,
             attributes["table_id"],
             attributes["dataset_id"],
             attributes["gcp_project_id"],
             fb_source,
         )
+"""
