@@ -80,7 +80,7 @@ def set_insights_query_params(daterange):
 
 
 time_ranges = [
-    '{"since": "2023-08-15", "until": "2023-11-15"}',
+    '{"since": "2023-08-15", "until": "2023-11-20"}',
     '{"since": "2023-05-15", "until": "2023-08-15"}',
     '{"since": "2023-02-15", "until": "2023-05-15"}',
     '{"since": "2022-11-15", "until": "2023-02-15"}',
@@ -303,3 +303,4 @@ def get_facebook_data():
                 fb_source,
             )
             first_run = False
+    logger.info("Execution complete")
