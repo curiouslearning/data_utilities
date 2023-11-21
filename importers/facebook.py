@@ -1,7 +1,7 @@
 from google.cloud import bigquery
-from google.api_core.retry import Retry
 from google.cloud.exceptions import NotFound
-from datetime import datetime
+from datetime import datetime as dt
+import datetime
 from facebook_business.api import FacebookAdsApi
 from facebook_business.adobjects.adaccount import AdAccount
 from facebook_business.adobjects.adaccountuser import AdAccountUser
@@ -9,6 +9,7 @@ from facebook_business.adobjects.adsinsights import AdsInsights
 from facebook_business.adobjects.campaign import Campaign
 import settings
 from retry import retry
+import ast
 
 logger = settings.init_logging()
 attributes = settings.get_secrets()
@@ -42,44 +43,42 @@ insights_query_fields = [
 ]
 
 
-def get_insights_query_params(bq_client):
-    import datetime
-
-    date = get_last_insert_date(bq_client)
-    last_run = date.strftime("%Y-%m-%d")
-    now = datetime.datetime.now().strftime("%Y-%m-%d")
-    daterange = "["
-    day = date
-    while day <= datetime.datetime.now():
-        daystr = day.strftime("%Y-%m-%d")
-        nextday = day + datetime.timedelta(days=1)
-        nextdaystr = nextday.strftime("%Y-%m-%d")
-        daterange += '{"since": "' + daystr + '", "until": "' + nextdaystr + '"},'
-        day = nextday
-
-    daterange += "]"
-
+def set_insights_query_params(daterange):
     insights_query_params = {
         "level": "campaign",
         "limit": "1000",
-        "time_ranges": daterange,
-        "increment": 1,
+        "time_range": daterange,
+        "time_increment": 1,
     }
     return insights_query_params
 
 
+# create a list of days to query based on the last inserted data
+def get_time_ranges(bq_client):
+    date = get_last_insert_date(bq_client)
+    last_run = date.strftime("%Y-%m-%d")
+    time_ranges = "["
+    day = date
+    while day.day < datetime.datetime.now().day:
+        daystr = day.strftime("%Y-%m-%d")
+        nextday = day + datetime.timedelta(days=1)
+        time_ranges += (
+            '\'{"since": "' + daystr + '", "until": "' + daystr + "\"}',"
+        )  # this makes it go midnight to midnight on the same day
+        day = nextday
+
+    time_ranges += "]"
+    return ast.literal_eval(time_ranges)
+
+
 @retry(backoff=3, tries=6, delay=5)
-def get_insights_retry(account, bq_client):
-    qp = get_insights_query_params(bq_client)
-    print("qp = " + str(qp))
-    breakpoint()
-    insights = account.get_insights(fields=insights_query_fields, params=qp)
+def get_insights_retry(account, insights_query_fields, qp):
+    insights = account.get_insights(insights_query_fields, qp)
     return insights
 
 
 @retry(NotFound, delay=5, tries=6)
 def insert_rows_json_retry(client, data, table):
-    print("trying insert")
     resp = client.insert_rows_json(json_rows=data, table=table)
     return resp
 
@@ -110,88 +109,89 @@ def lookup_campaign(campaign_id, campaigns):
 
 
 def get_last_insert_date(bq_client):
+    table_name = (
+        attributes["gcp_project_id"]
+        + "."
+        + attributes["dataset_id"]
+        + "."
+        + attributes["table_id"]
+    )
     sql_query = f"""
         select max(date_inserted)
-        FROM `dataexploration-193817.marketing_data.facebook_ads_data`
+        FROM `{table_name}`
     """
+    print(sql_query)
     query_job = bq_client.query(sql_query)
     rows = query_job.result()
     row = next(rows)
     return row[0]
-
-    return last
 
 
 def get_facebook_data():
     logger.info("Facebook import function is running. ")
 
     bigquery_client = bigquery.Client()
-    try:
-        FacebookAdsApi.init(
-            attributes["fb_app_id"],
-            attributes["fb_app_secret"],
-            attributes["fb_access_token"],
-        )
+    FacebookAdsApi.init(
+        attributes["fb_app_id"],
+        attributes["fb_app_secret"],
+        attributes["fb_access_token"],
+    )
+    time_ranges = get_time_ranges(bigquery_client)
+    account = AdAccount("act_" + str(attributes["fb_account_id"]))
+    campaigns = account.get_campaigns(campaigns_query_fields, campaigns_query_params)
 
-        account = AdAccount("act_" + str(attributes["fb_account_id"]))
-        campaigns = account.get_campaigns(
-            campaigns_query_fields, campaigns_query_params
-        )
-        insights = get_insights_retry(account, bigquery_client)
+    for timerange in time_ranges:
+        logger.info("Processing timerange: " + str(timerange))
+        qp = set_insights_query_params(timerange)
+        insights = get_insights_retry(account, insights_query_fields, qp)
 
-    except Exception as e:
-        logger.error(e)
-        raise
+        fb_source = []
+        for index, item in enumerate(insights):
+            actions = []
+            conversions = []
 
-    fb_source = []
-    for index, item in enumerate(insights):
-        actions = []
-        conversions = []
+            id = item.get("campaign_id")
 
-        id = item.get("campaign_id")
+            campaign = lookup_campaign(id, campaigns)
 
-        campaign = lookup_campaign(id, campaigns)
+            if "actions" in item:
+                for i, value in enumerate(item["actions"]):
+                    actions.append(
+                        {"action_type": value["action_type"], "value": value["value"]}
+                    )
 
-        if "actions" in item:
-            for i, value in enumerate(item["actions"]):
-                actions.append(
-                    {"action_type": value["action_type"], "value": value["value"]}
-                )
+            if "conversions" in item:
+                for i, value in enumerate(item["conversions"]):
+                    conversions.append(
+                        {"action_type": value["action_type"], "value": value["value"]}
+                    )
+            bq_date_time = dt.now().strftime("%Y-%m-%d %H:%M:%S.%f")
+            fb_source.append(
+                {
+                    "date_inserted": bq_date_time,
+                    "data_date_start": item.get("date_start"),
+                    "campaign_id": item.get("campaign_id"),
+                    "campaign_name": item.get("campaign_name"),
+                    "created_time": campaign.get("created_time", ""),
+                    "start_time": campaign.get("start_time", ""),
+                    "end_time": campaign.get("end_time", ""),
+                    "status": campaign.get("status", ""),
+                    "objective": campaign.get("objective", ""),
+                    "clicks": item.get("clicks"),
+                    "impressions": item.get("impressions"),
+                    "reach": item.get("reach"),
+                    "cpc": item.get("cpc", 0),
+                    "spend": item.get("spend"),
+                    "conversions": conversions,
+                    "actions": actions,
+                }
+            )
 
-        if "conversions" in item:
-            for i, value in enumerate(item["conversions"]):
-                conversions.append(
-                    {"action_type": value["action_type"], "value": value["value"]}
-                )
-        bq_date_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
-        fb_source.append(
-            {
-                "date_inserted": bq_date_time,
-                "data_date_start": item.get("date_start"),
-                "campaign_id": item.get("campaign_id"),
-                "campaign_name": item.get("campaign_name"),
-                "created_time": campaign.get("created_time", ""),
-                "start_time": campaign.get("start_time", ""),
-                "end_time": campaign.get("end_time", ""),
-                "status": campaign.get("status", ""),
-                "objective": campaign.get("objective", ""),
-                "clicks": item.get("clicks"),
-                "impressions": item.get("impressions"),
-                "reach": item.get("reach"),
-                "cpc": item.get("cpc", 0),
-                "spend": item.get("spend"),
-                "conversions": conversions,
-                "actions": actions,
-            }
-        )
-        print("Data = " + str(fb_source))
-
-
-"""        insert_rows_bigquery(
+        insert_rows_bigquery(
             bigquery_client,
             attributes["table_id"],
             attributes["dataset_id"],
             attributes["gcp_project_id"],
             fb_source,
         )
-"""
+    logger.info("Execution complete")
