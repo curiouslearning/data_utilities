@@ -59,7 +59,7 @@ def get_time_ranges(bq_client):
     last_run = date.strftime("%Y-%m-%d")
     time_ranges = "["
     day = date
-    while day.day < datetime.datetime.now().day:
+    while day.day <= datetime.datetime.now().day - 1:  # go until yesterday
         daystr = day.strftime("%Y-%m-%d")
         nextday = day + datetime.timedelta(days=1)
         time_ranges += (
@@ -68,6 +68,7 @@ def get_time_ranges(bq_client):
         day = nextday
 
     time_ranges += "]"
+    #   time_ranges = '[ \'{"since": "2023-11-26", "until": "2023-11-27"}\']'
     return ast.literal_eval(time_ranges)
 
 
