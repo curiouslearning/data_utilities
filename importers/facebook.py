@@ -10,6 +10,7 @@ from facebook_business.adobjects.campaign import Campaign
 import settings
 from retry import retry
 import ast
+from rich import print
 
 logger = settings.init_logging()
 attributes = settings.get_secrets()
@@ -40,6 +41,7 @@ insights_query_fields = [
     AdsInsights.Field.clicks,
     AdsInsights.Field.actions,
     AdsInsights.Field.conversions,
+    AdsInsights.Field.location,
 ]
 
 
@@ -56,10 +58,13 @@ def set_insights_query_params(daterange):
 # create a list of days to query based on the last inserted data
 def get_time_ranges(bq_client):
     date = get_last_insert_date(bq_client)
-    last_run = date.strftime("%Y-%m-%d")
+
     time_ranges = "["
     day = date
-    while day.day <= datetime.datetime.now().day - 1:  # go until yesterday
+
+    while day <= datetime.datetime.now() - datetime.timedelta(
+        days=1
+    ):  # go until yesterday
         daystr = day.strftime("%Y-%m-%d")
         nextday = day + datetime.timedelta(days=1)
         time_ranges += (
@@ -68,7 +73,8 @@ def get_time_ranges(bq_client):
         day = nextday
 
     time_ranges += "]"
-    #   time_ranges = '[ \'{"since": "2023-11-26", "until": "2023-11-27"}\']'
+
+    # time_ranges = '[ \'{"since": "2023-09-05", "until": "2023-12-05"}\']'
     return ast.literal_eval(time_ranges)
 
 
@@ -121,7 +127,7 @@ def get_last_insert_date(bq_client):
         select max(date_inserted)
         FROM `{table_name}`
     """
-    print(sql_query)
+
     query_job = bq_client.query(sql_query)
     rows = query_job.result()
     row = next(rows)
@@ -138,11 +144,15 @@ def get_facebook_data():
         attributes["fb_access_token"],
     )
     time_ranges = get_time_ranges(bigquery_client)
+    logger.info(time_ranges)
+
     account = AdAccount("act_" + str(attributes["fb_account_id"]))
     campaigns = account.get_campaigns(campaigns_query_fields, campaigns_query_params)
+    print(campaigns)
 
     for timerange in time_ranges:
         logger.info("Processing timerange: " + str(timerange))
+        print("Processing timerange: " + str(timerange))
         qp = set_insights_query_params(timerange)
         insights = get_insights_retry(account, insights_query_fields, qp)
 
@@ -175,9 +185,10 @@ def get_facebook_data():
                     "campaign_name": item.get("campaign_name"),
                     "created_time": campaign.get("created_time", ""),
                     "start_time": campaign.get("start_time", ""),
-                    "end_time": campaign.get("end_time", ""),
+                    "end_time": campaign.get("stop_time", ""),
                     "status": campaign.get("status", ""),
                     "objective": campaign.get("objective", ""),
+                    "location": item.get("location", ""),
                     "clicks": item.get("clicks"),
                     "impressions": item.get("impressions"),
                     "reach": item.get("reach"),
@@ -195,4 +206,5 @@ def get_facebook_data():
             attributes["gcp_project_id"],
             fb_source,
         )
-    logger.info("Execution complete")
+
+    logger.info("Execution complete.  Rows inserted: " + str(len(fb_source)))

@@ -42,6 +42,7 @@ insights_query_fields = [
     AdsInsights.Field.conversions,
     AdsInsights.Field.date_start,
     AdsInsights.Field.date_stop,
+    AdsInsights.Field.location,
 ]
 
 
@@ -80,22 +81,23 @@ def set_insights_query_params(daterange):
 
 
 time_ranges = [
-    '{"since": "2023-08-15", "until": "2023-11-20"}',
-    '{"since": "2023-05-15", "until": "2023-08-15"}',
-    '{"since": "2023-02-15", "until": "2023-05-15"}',
-    '{"since": "2022-11-15", "until": "2023-02-15"}',
-    '{"since": "2022-08-15", "until": "2022-11-15"}',
-    '{"since": "2022-05-15", "until": "2022-08-15"}',
-    '{"since": "2022-02-15", "until": "2022-05-15"}',
-    '{"since": "2021-11-15", "until": "2022-02-15"}',
-    '{"since": "2021-08-15", "until": "2021-11-15"}',
-    '{"since": "2021-05-15", "until": "2021-08-15"}',
-    '{"since": "2021-02-15", "until": "2021-05-15"}',
-    '{"since": "2020-11-15", "until": "2021-02-15"}',
-    '{"since": "2020-08-15", "until": "2020-11-15"}',
-    '{"since": "2020-05-15", "until": "2020-08-15"}',
-    '{"since": "2020-02-15", "until": "2020-05-15"}',
-    '{"since": "2020-01-01", "until": "2020-02-15"}',
+    #    '{"since": "2023-11-20", "until": "2023-12-04"}',
+    #    '{"since": "2023-08-15", "until": "2023-11-20"}',
+    #   '{"since": "2023-05-15", "until": "2023-08-15"}',
+    #   '{"since": "2023-02-15", "until": "2023-05-15"}',
+    #   '{"since": "2022-11-15", "until": "2023-02-15"}',
+    #   '{"since": "2022-08-15", "until": "2022-11-15"}',
+    #   '{"since": "2022-05-15", "until": "2022-08-15"}',
+    #   '{"since": "2022-02-15", "until": "2022-05-15"}',
+    #   '{"since": "2021-11-15", "until": "2022-02-15"}',
+    #   '{"since": "2021-08-15", "until": "2021-11-15"}',
+    #   '{"since": "2021-05-15", "until": "2021-08-15"}',
+    #   '{"since": "2021-02-15", "until": "2021-05-15"}',
+    #   '{"since": "2020-11-15", "until": "2021-02-15"}',
+    '{"since": "2020-09-05", "until": "2020-11-15"}',
+    #   '{"since": "2020-05-15", "until": "2020-08-15"}',
+    #   '{"since": "2020-02-15", "until": "2020-05-15"}',
+    #   '{"since": "2020-01-01", "until": "2020-02-15"}',
 ]
 
 
@@ -114,6 +116,7 @@ schema_facebook_stat = [
     bigquery.SchemaField("reach", "INTEGER", mode="REQUIRED"),
     bigquery.SchemaField("cpc", "FLOAT", mode="REQUIRED"),
     bigquery.SchemaField("spend", "FLOAT", mode="REQUIRED"),
+    bigquery.SchemaField("location", "STRING", mode="REQUIRED"),
     bigquery.SchemaField(
         "conversions",
         "RECORD",
@@ -279,6 +282,7 @@ def get_facebook_data():
                     "reach": item.get("reach"),
                     "cpc": item.get("cpc", 0),
                     "spend": item.get("spend"),
+                    "location": item.get("location", ""),
                     "conversions": conversions,
                     "actions": actions,
                 }
