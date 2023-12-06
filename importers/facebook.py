@@ -148,7 +148,6 @@ def get_facebook_data():
 
     account = AdAccount("act_" + str(attributes["fb_account_id"]))
     campaigns = account.get_campaigns(campaigns_query_fields, campaigns_query_params)
-    print(campaigns)
 
     for timerange in time_ranges:
         logger.info("Processing timerange: " + str(timerange))

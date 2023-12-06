@@ -10,6 +10,7 @@ from facebook_business.adobjects.adsinsights import AdsInsights
 from facebook_business.adobjects.campaign import Campaign
 import settings
 from retry import retry
+from rich import print
 
 logger = settings.init_logging()
 attributes = settings.get_secrets()
@@ -40,13 +41,29 @@ insights_query_fields = [
     AdsInsights.Field.clicks,
     AdsInsights.Field.actions,
     AdsInsights.Field.conversions,
-    AdsInsights.Field.date_start,
-    AdsInsights.Field.date_stop,
     AdsInsights.Field.location,
 ]
 
 
-@retry(NotFound, delay=5, tries=6)
+time_ranges = [
+    '{"since": "2023-11-05", "until": "2023-12-04"}',
+    '{"since": "2023-10-04", "until": "2023-11-04"}',
+    '{"since": "2023-08-04", "until": "2023-10-04"}',
+    '{"since": "2023-06-04", "until": "2023-08-04"}',
+    '{"since": "2023-03-04", "until": "2023-06-04"}',
+    '{"since": "2023-01-04", "until": "2023-03-04"}',
+    '{"since": "2022-10-04", "until": "2023-01-04"}',
+    '{"since": "2022-07-04", "until": "2022-10-04"}',
+    '{"since": "2022-04-04", "until": "2022-07-04"}',
+    '{"since": "2022-01-04", "until": "2022-04-04"}',
+    '{"since": "2021-10-04", "until": "2022-01-04"}',
+    '{"since": "2021-07-04", "until": "2021-10-04"}',
+    '{"since": "2021-04-04", "until": "2021-07-04"}',
+    '{"since": "2021-02-14", "until": "2021-04-04"}',
+]
+
+
+@retry(NotFound, delay=10, tries=6)
 def insert_rows_json_retry(client, data, table):
     print("trying insert")
     resp = client.insert_rows_json(json_rows=data, table=table)
@@ -55,19 +72,9 @@ def insert_rows_json_retry(client, data, table):
 
 @retry(backoff=3, tries=6, delay=5)
 def get_insights_retry(account, insights_query_fields, qp):
+    print("Insights query")
     insights = account.get_insights(insights_query_fields, qp)
     return insights
-
-
-@retry(NotFound, delay=5, tries=6)
-def check_table_existence(client, table_id):
-    print("checking for table: " + table_id)
-    try:
-        client.get_table(table_id)  # Make an API request.
-        print("Table {} already exists.".format(table_id))
-    except NotFound:
-        print("Table Not found")
-        raise
 
 
 def set_insights_query_params(daterange):
@@ -80,125 +87,20 @@ def set_insights_query_params(daterange):
     return insights_query_params
 
 
-time_ranges = [
-    #    '{"since": "2023-11-20", "until": "2023-12-04"}',
-    #    '{"since": "2023-08-15", "until": "2023-11-20"}',
-    #   '{"since": "2023-05-15", "until": "2023-08-15"}',
-    #   '{"since": "2023-02-15", "until": "2023-05-15"}',
-    #   '{"since": "2022-11-15", "until": "2023-02-15"}',
-    #   '{"since": "2022-08-15", "until": "2022-11-15"}',
-    #   '{"since": "2022-05-15", "until": "2022-08-15"}',
-    #   '{"since": "2022-02-15", "until": "2022-05-15"}',
-    #   '{"since": "2021-11-15", "until": "2022-02-15"}',
-    #   '{"since": "2021-08-15", "until": "2021-11-15"}',
-    #   '{"since": "2021-05-15", "until": "2021-08-15"}',
-    #   '{"since": "2021-02-15", "until": "2021-05-15"}',
-    #   '{"since": "2020-11-15", "until": "2021-02-15"}',
-    '{"since": "2020-09-05", "until": "2020-11-15"}',
-    #   '{"since": "2020-05-15", "until": "2020-08-15"}',
-    #   '{"since": "2020-02-15", "until": "2020-05-15"}',
-    #   '{"since": "2020-01-01", "until": "2020-02-15"}',
-]
-
-
-schema_facebook_stat = [
-    bigquery.SchemaField("date_inserted", "DATETIME", mode="REQUIRED"),
-    bigquery.SchemaField("data_date_start", "DATETIME", mode="REQUIRED"),
-    bigquery.SchemaField("campaign_id", "STRING", mode="REQUIRED"),
-    bigquery.SchemaField("campaign_name", "STRING", mode="REQUIRED"),
-    bigquery.SchemaField("created_time", "STRING", mode="REQUIRED"),
-    bigquery.SchemaField("start_time", "STRING", mode="REQUIRED"),
-    bigquery.SchemaField("end_time", "STRING", mode="REQUIRED"),
-    bigquery.SchemaField("status", "STRING", mode="REQUIRED"),
-    bigquery.SchemaField("objective", "STRING", mode="REQUIRED"),
-    bigquery.SchemaField("clicks", "INTEGER", mode="REQUIRED"),
-    bigquery.SchemaField("impressions", "INTEGER", mode="REQUIRED"),
-    bigquery.SchemaField("reach", "INTEGER", mode="REQUIRED"),
-    bigquery.SchemaField("cpc", "FLOAT", mode="REQUIRED"),
-    bigquery.SchemaField("spend", "FLOAT", mode="REQUIRED"),
-    bigquery.SchemaField("location", "STRING", mode="REQUIRED"),
-    bigquery.SchemaField(
-        "conversions",
-        "RECORD",
-        mode="REPEATED",
-        fields=(
-            bigquery.SchemaField("action_type", "STRING"),
-            bigquery.SchemaField("value", "STRING"),
-        ),
-    ),
-    bigquery.SchemaField(
-        "actions",
-        "RECORD",
-        mode="REPEATED",
-        fields=(
-            bigquery.SchemaField("action_type", "STRING"),
-            bigquery.SchemaField("value", "STRING"),
-        ),
-    ),
-]
-
 clustering_fields_facebook = ["campaign_id", "campaign_name"]
 
 
-def setup_bigquery_table(
-    first_run, client, table_id, dataset_id, project_id, schema, clustering_fields=None
-):
-    try:
-        dataset_ref = "{}.{}".format(project_id, dataset_id)
-        client.get_dataset(dataset_ref)  # Make an API request.
-
-    except NotFound:
-        dataset_ref = "{}.{}".format(project_id, dataset_id)
-        dataset = bigquery.Dataset(dataset_ref)
-        dataset.location = "US"
-        dataset = client.create_dataset(dataset)  # Make an API request.
-        logger.info("Created dataset {}.{}".format(client.project, dataset.dataset_id))
-
-    try:
-        table_ref = "{}.{}.{}".format(project_id, dataset_id, table_id)
-        table = client.get_table(table_ref)  # Make an API request.
-
-        if first_run:
-            try:
-                client.delete_table(table)
-            except Exception as e:
-                logger.info("Table delete failed")
-                logger.error(e)
-            try:
-                create_table_bigquery(
-                    client, table_id, dataset_id, project_id, schema, clustering_fields
-                )
-            except Exception as e:
-                logger.info("Table recreate failed")
-                logger.error(e)
-
-    except NotFound:
-        create_table_bigquery(
-            client, table_id, dataset_id, project_id, schema, clustering_fields
-        )
-    return "ok"
-
-
-def create_table_bigquery(
-    client, table_id, dataset_id, project_id, schema, clustering_fields
-):
-    table_ref = "{}.{}.{}".format(project_id, dataset_id, table_id)
-
-    table = bigquery.Table(table_ref, schema=schema)
-
-    if clustering_fields is not None:
-        table.clustering_fields = clustering_fields
-
-    table = client.create_table(table)  # Make an API request.
-    logger.info("table created")
-    logger.info(
-        "Created table {}.{}.{}".format(table.project, table.dataset_id, table.table_id)
+@retry(delay=1, tries=3)
+def truncate_table(bq_client):
+    table_ref = "{}.{}.{}".format(
+        attributes["gcp_project_id"], attributes["dataset_id"], attributes["table_id"]
     )
+    print("Truncating " + str(table_ref))
+    query_job = bq_client.query(f"TRUNCATE table {table_ref}")
 
 
 def insert_rows_bigquery(client, table_id, dataset_id, project_id, data):
     table_ref = "{}.{}.{}".format(project_id, dataset_id, table_id)
-    check_table_existence(client, table_ref)
 
     table = client.get_table(table_ref)
 
@@ -207,7 +109,9 @@ def insert_rows_bigquery(client, table_id, dataset_id, project_id, data):
         while resp is None:
             resp = insert_rows_json_retry(client, data, table)
             if len(resp) > 0:
-                logger.info(str(resp))
+                logger.error(str(resp))
+                print("ERROR:  Didn't insert for timeframe")
+                print(str(resp))
                 break
             else:
                 logger.info("Success uploaded to table {}".format(table.table_id))
@@ -239,17 +143,19 @@ def get_facebook_data():
 
     account = AdAccount("act_" + str(attributes["fb_account_id"]))
     campaigns = account.get_campaigns(campaigns_query_fields, campaigns_query_params)
-    first_run = True
+    truncate_table(bigquery_client)
+
     for timerange in time_ranges:
-        print(timerange)
+        print("Processing timerange " + str(timerange))
         qp = set_insights_query_params(timerange)
         insights = get_insights_retry(account, insights_query_fields, qp)
 
         fb_source = []
+        temp = []
+
         for index, item in enumerate(insights):
             actions = []
             conversions = []
-
             id = item.get("campaign_id")
 
             campaign = lookup_campaign(id, campaigns)
@@ -274,7 +180,7 @@ def get_facebook_data():
                     "campaign_name": item.get("campaign_name"),
                     "created_time": campaign.get("created_time", ""),
                     "start_time": campaign.get("start_time", ""),
-                    "end_time": campaign.get("end_time", ""),
+                    "end_time": campaign.get("stop_time", ""),
                     "status": campaign.get("status", ""),
                     "objective": campaign.get("objective", ""),
                     "clicks": item.get("clicks"),
@@ -287,24 +193,14 @@ def get_facebook_data():
                     "actions": actions,
                 }
             )
-        if (
-            setup_bigquery_table(
-                first_run,
-                bigquery_client,
-                attributes["table_id"],
-                attributes["dataset_id"],
-                attributes["gcp_project_id"],
-                schema_facebook_stat,
-                clustering_fields_facebook,
-            )
-            == "ok"
-        ):
-            insert_rows_bigquery(
-                bigquery_client,
-                attributes["table_id"],
-                attributes["dataset_id"],
-                attributes["gcp_project_id"],
-                fb_source,
-            )
-            first_run = False
+
+        print("Inserting rows: " + str(len(fb_source)))
+        insert_rows_bigquery(
+            bigquery_client,
+            attributes["table_id"],
+            attributes["dataset_id"],
+            attributes["gcp_project_id"],
+            fb_source,
+        )
+
     logger.info("Execution complete")
