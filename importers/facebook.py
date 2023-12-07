@@ -58,6 +58,7 @@ def set_insights_query_params(daterange):
 # create a list of days to query based on the last inserted data
 def get_time_ranges(bq_client):
     date = get_last_insert_date(bq_client)
+    print(str(date))
 
     time_ranges = "["
     day = date
@@ -148,6 +149,7 @@ def get_facebook_data():
 
     account = AdAccount("act_" + str(attributes["fb_account_id"]))
     campaigns = account.get_campaigns(campaigns_query_fields, campaigns_query_params)
+    rows = 0
 
     for timerange in time_ranges:
         logger.info("Processing timerange: " + str(timerange))
@@ -205,5 +207,6 @@ def get_facebook_data():
             attributes["gcp_project_id"],
             fb_source,
         )
+        rows = rows + len(fb_source)
 
-    logger.info("Execution complete.  Rows inserted: " + str(len(fb_source)))
+    logger.info("Execution complete.  Rows inserted: " + str(rows))
