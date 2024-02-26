@@ -189,7 +189,7 @@ def get_facebook_data():
                     "end_time": campaign.get("stop_time", ""),
                     "status": campaign.get("status", ""),
                     "objective": campaign.get("objective", ""),
-                    "location": item.get("location", ""),
+                    "location": item.get("location"),
                     "clicks": item.get("clicks"),
                     "impressions": item.get("impressions"),
                     "reach": item.get("reach"),
@@ -199,7 +199,10 @@ def get_facebook_data():
                     "actions": actions,
                 }
             )
+        print(fb_source)
 
+
+"""
         insert_rows_bigquery(
             bigquery_client,
             attributes["table_id"],
@@ -208,5 +211,6 @@ def get_facebook_data():
             fb_source,
         )
         rows = rows + len(fb_source)
+"""
 
-    logger.info("Execution complete.  Rows inserted: " + str(rows))
+# logger.info("Execution complete.  Rows inserted: " + str(rows))

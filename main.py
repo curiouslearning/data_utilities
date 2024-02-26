@@ -1,4 +1,4 @@
-import importers.facebook as fb
+import facebook as fb
 import settings
 
 
