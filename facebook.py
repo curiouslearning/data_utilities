@@ -2,6 +2,7 @@ from google.cloud import bigquery
 from google.cloud.exceptions import NotFound
 from datetime import datetime as dt
 import datetime
+from datetime import timezone
 from facebook_business.api import FacebookAdsApi
 from facebook_business.adobjects.adaccount import AdAccount
 from facebook_business.adobjects.adaccountuser import AdAccountUser
@@ -41,7 +42,6 @@ insights_query_fields = [
     AdsInsights.Field.clicks,
     AdsInsights.Field.actions,
     AdsInsights.Field.conversions,
-    AdsInsights.Field.location,
 ]
 
 
@@ -58,14 +58,11 @@ def set_insights_query_params(daterange):
 # create a list of days to query based on the last inserted data
 def get_time_ranges(bq_client):
     date = get_last_insert_date(bq_client)
-    print(str(date))
 
     time_ranges = "["
     day = date
 
-    while day <= datetime.datetime.now() - datetime.timedelta(
-        days=1
-    ):  # go until yesterday
+    while day <= datetime.datetime.now(timezone.utc):  # go until today
         daystr = day.strftime("%Y-%m-%d")
         nextday = day + datetime.timedelta(days=1)
         time_ranges += (
@@ -153,7 +150,7 @@ def get_facebook_data():
 
     for timerange in time_ranges:
         logger.info("Processing timerange: " + str(timerange))
-        print("Processing timerange: " + str(timerange))
+
         qp = set_insights_query_params(timerange)
         insights = get_insights_retry(account, insights_query_fields, qp)
 
@@ -177,7 +174,7 @@ def get_facebook_data():
                     conversions.append(
                         {"action_type": value["action_type"], "value": value["value"]}
                     )
-            bq_date_time = dt.now().strftime("%Y-%m-%d %H:%M:%S.%f")
+            bq_date_time = dt.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
             fb_source.append(
                 {
                     "date_inserted": bq_date_time,
@@ -187,9 +184,9 @@ def get_facebook_data():
                     "created_time": campaign.get("created_time", ""),
                     "start_time": campaign.get("start_time", ""),
                     "end_time": campaign.get("stop_time", ""),
+                    "location": "deprecated",
                     "status": campaign.get("status", ""),
                     "objective": campaign.get("objective", ""),
-                    "location": item.get("location"),
                     "clicks": item.get("clicks"),
                     "impressions": item.get("impressions"),
                     "reach": item.get("reach"),
@@ -199,10 +196,7 @@ def get_facebook_data():
                     "actions": actions,
                 }
             )
-        print(fb_source)
 
-
-"""
         insert_rows_bigquery(
             bigquery_client,
             attributes["table_id"],
@@ -211,6 +205,7 @@ def get_facebook_data():
             fb_source,
         )
         rows = rows + len(fb_source)
-"""
-
-# logger.info("Execution complete.  Rows inserted: " + str(rows))
+    if rows > 0:
+        logger.info("Execution complete.  Rows inserted: " + str(rows))
+    else:
+        logger.warning("Execution complete.  Rows inserted: " + str(rows))

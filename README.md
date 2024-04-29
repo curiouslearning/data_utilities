@@ -2,6 +2,8 @@
 
 This is a python app setup to run as a google cloud function. In order to test locally you need to setup a local gcloud environment and use the functions_framework package.
 
+Locally run: functions-framework --target import_data and then load http://localhost:8080/ in your browser to trigger
+
 Deploy with "gcloud functions deploy marketing_data_etl_function --gen2 --entry-point=import_data"
 
 There are tutorials and examples of how to do this here:
