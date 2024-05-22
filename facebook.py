@@ -61,6 +61,7 @@ def get_time_ranges(bq_client):
 
     time_ranges = "["
     day = date
+    day = day.replace(tzinfo=timezone.utc)
 
     while day <= datetime.datetime.now(timezone.utc):  # go until today
         daystr = day.strftime("%Y-%m-%d")
@@ -197,13 +198,13 @@ def get_facebook_data():
                 }
             )
 
-        insert_rows_bigquery(
-            bigquery_client,
-            attributes["table_id"],
-            attributes["dataset_id"],
-            attributes["gcp_project_id"],
-            fb_source,
-        )
+       # insert_rows_bigquery(
+       #     bigquery_client,
+       #     attributes["table_id"],
+       #     attributes["dataset_id"],
+       #     attributes["gcp_project_id"],
+       #     fb_source,
+       # )
         rows = rows + len(fb_source)
     if rows > 0:
         logger.info("Execution complete.  Rows inserted: " + str(rows))
