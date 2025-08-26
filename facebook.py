@@ -58,23 +58,24 @@ def set_insights_query_params(daterange):
 # create a list of days to query based on the last inserted data
 def get_time_ranges(bq_client):
     date = get_last_insert_date(bq_client)
-
-    time_ranges = "["
     day = date
     day = day.replace(tzinfo=timezone.utc)
 
-    while day <= datetime.datetime.now(timezone.utc):  # go until today
+    time_ranges = []
+    while day <= datetime.datetime.now(timezone.utc):
         daystr = day.strftime("%Y-%m-%d")
-        nextday = day + datetime.timedelta(days=1)
-        time_ranges += (
-            '\'{"since": "' + daystr + '", "until": "' + daystr + "\"}',"
-        )  # this makes it go midnight to midnight on the same day
-        day = nextday
+        time_ranges.append({
+            "since": daystr,
+            "until": daystr
+        })
+        day = day + datetime.timedelta(days=1)
+        
 
-    time_ranges += "]"
+#    time_ranges = [
+#        {"since": "2025-08-05", "until": "2025-08-06"}
+#    ]
 
-    # time_ranges = '[ \'{"since": "2023-09-05", "until": "2023-12-05"}\']'
-    return ast.literal_eval(time_ranges)
+    return time_ranges
 
 
 @retry(backoff=3, tries=6, delay=5)
